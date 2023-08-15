@@ -40,9 +40,9 @@ class DenseGeneral(nn.Module):
   features: Union[Iterable[int], int]
   axis: Union[Iterable[int], int] = -1
   use_bias: bool = True
-  dtype: Optional[Dtype] = None
+  dtype: Optional[Dtype] = jnp.float32
   param_dtype: Dtype = jnp.float32
-  amax_history_length: int = 16
+  amax_history_length: int = 1024
   kernel_init: Callable[[PRNGKey, Shape, Dtype], Array] = \
       nn.initializers.lecun_normal()
   bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.zeros

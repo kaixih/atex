@@ -2,8 +2,8 @@ from functools import partial
 from absl.testing import absltest
 
 import numpy as np
+import os
 import re
-import tensorflow as tf
 
 from flax import traverse_util
 from jax import jit
@@ -67,9 +67,12 @@ def attention_output_projection(inputs, w, use_bias, b, use_nhd_shape):
 
 class EinsumToDotAdaptorTest(test_utils.TestCase):
   def setUp(self):
+    # The tests need to check the dtypes of the cublaslt custom calls, so we
+    # disable the triton gemms.
+    os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+
     super().setUp()
     np.random.seed(123456)
-    tf.random.set_seed(123)
 
   def testQKVCombinedProjFwd(self):
     prng_key = random.PRNGKey(seed=123)

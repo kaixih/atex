@@ -5,8 +5,9 @@ from __future__ import print_function
 
 from absl.testing import absltest
 from functools import partial
-import re
 import optax
+import os
+import re
 
 import jax._src.test_util as jtu
 from jax import grad
@@ -25,16 +26,27 @@ def roll_and_update(amax_h, update):
 
 def compute_scale(amax, scale, fp8_max, margin=0):
   """Default function to convert amax to scaling factor."""
+  scale = 1.0 / scale
   exp = jnp.floor(jnp.log2(fp8_max / amax)) - margin
   sf = jnp.round(lax.pow(2., jnp.abs(exp)))
   sf = jnp.where(amax > 0.0, sf, scale)
   sf = jnp.where(lax.is_finite(amax), sf, scale)
   sf = jnp.where(exp < 0, 1.0 / sf, sf)
-  return sf
+  return 1.0 / sf
 
 @jtu.with_config(jax_numpy_rank_promotion='allow',
                  jax_numpy_dtype_promotion='standard')
 class DenseTest(jtu.JaxTestCase):
+  def setUp(self):
+    # The tests need to check the dtypes of the cublaslt custom calls, so we
+    # disable the triton gemms.
+    os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+
+    super().setUp()
+
+  def setUp(self):
+    super(DenseTest, self).setUp()
+    os.environ['XLA_FLAGS'] = "--xla_gpu_enable_triton_gemm=false"
 
   def testDenseFwd(self):
     x = random.uniform(random.PRNGKey(1), (48, 16))
@@ -506,10 +518,9 @@ class DenseTest(jtu.JaxTestCase):
       self.assertAllClose(fp8_vars['output_grad_amax_history'],
                           amax_history_dy, rtol=rtol, atol=atol)
 
-      self.assertAllClose(1. / fp8_vars['input_scale'][0], scale_x)
-      self.assertAllClose(1. / fp8_vars['kernel_scale'][0], scale_k)
-      self.assertAllClose(
-          1. / fp8_vars['output_grad_scale'][0], scale_dy)
+      self.assertAllClose(fp8_vars['input_scale'][0], scale_x)
+      self.assertAllClose(fp8_vars['kernel_scale'][0], scale_k)
+      self.assertAllClose(fp8_vars['output_grad_scale'][0], scale_dy)
 
 
 if __name__ == '__main__':

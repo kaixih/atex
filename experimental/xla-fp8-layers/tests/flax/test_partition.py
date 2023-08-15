@@ -4,6 +4,7 @@ from __future__ import division
 from __future__ import print_function
 
 from absl.testing import absltest
+import os
 import re
 
 import optax
@@ -58,8 +59,11 @@ def get_hlo_text(rules):
 @jtu.with_config(jax_numpy_rank_promotion='allow',
                  jax_numpy_dtype_promotion='standard')
 class PartitionTest(jtu.JaxTestCase):
-
   def setUp(self):
+    # The tests need to check the dtypes of the cublaslt custom calls, so we
+    # disable the triton gemms.
+    os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+
     super().setUp()
 
   def testAllReduceDp(self):
@@ -427,7 +431,27 @@ class PartitionTest(jtu.JaxTestCase):
              ('mlp', 'model'))
 
     hlo_text = get_hlo_text(rules)
-    # TODO(shuw): Add type check when all-gather is included in whitelist.
+    self.assertRegex(
+        hlo_text, re.compile('.*'.join([re.escape(x) for x in (
+            'cublas',
+            'f32[2048,4096]{1,0}',
+            'custom-call',
+            'f8e4m3fn[8192,2048]{0,1}',
+            'f8e4m3fn[4096,8192]{1,0}',
+            'epilogue',
+            'DEFAULT',
+        )])), msg='y tensor')
+    self.assertRegex(
+        hlo_text, re.compile('.*'.join([re.escape(x) for x in (
+            'cublas',
+            'f32[8192,4096]{1,0}',
+            'custom-call',
+            'f8e4m3fn[2048,8192]{0,1}',
+            'f8e5m2[4096,2048]{1,0}',
+            'epilogue',
+            'DEFAULT',
+        )])), msg='dw tensor')
+
     # The all-reduce for the amax follows the same replica group.
     self.assertRegex(
         hlo_text, re.compile('.*'.join([re.escape(x) for x in (
@@ -443,17 +467,17 @@ class PartitionTest(jtu.JaxTestCase):
     self.assertRegex(
           hlo_text, re.compile('.*'.join([re.escape(x) for x in (
               'all-gather',
-              'f32[2048,8192]', # output
+              'f16[2048,8192]', # output
               'all-gather',
-              'f32[2048,4096]', # input
+              'f16[2048,4096]', # input
               'replica_groups={{0,1},{2,3},{4,5},{6,7}}',
           )])), msg="all-gather on input x for matmul")
     self.assertRegex(
           hlo_text, re.compile('.*'.join([re.escape(x) for x in (
               'all-gather',
-              'f32[8192,4096]', # output
+              'f16[8192,4096]', # output
               'all-gather',
-              'f32[2048,4096]', # input
+              'f16[2048,4096]', # input
               'replica_groups={{0,2,4,6},{1,3,5,7}}',
           )])), msg="all-gather on kernel k for matmul")
 

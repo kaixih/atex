@@ -1,0 +1,4 @@
+**/__pycache__/
+build/
+fp8layers_python.egg-info/
+model_3/

@@ -5,17 +5,18 @@ from jax import custom_vjp
 from jax import lax
 from jax import numpy as jnp
 
-def get_fp8_max(fp8_dtype):
+def get_fp8_max(fp8_dtype, out_dtype):
   assert fp8_dtype in (jnp.float8_e4m3fn, jnp.float8_e5m2)
-  return jnp.finfo(fp8_dtype).max.astype(jnp.float32)
+  return jnp.finfo(fp8_dtype).max.astype(out_dtype)
 
 def quantize(x, q_dtype, scale, compute_dtype):
   # We need to explicitly cast the max value to compute_dtype, otherwise the jax
   # dtype promotion will cast the scaled_x to fp32 in the following ops, which
   # would violate the fp8-matmul pattern matching.
-  dtype_max = get_fp8_max(q_dtype).astype(compute_dtype)
+  dtype_max = get_fp8_max(q_dtype, compute_dtype)
 
   scaled_x = x / scale.astype(compute_dtype)
+
   clipped_x = jnp.clip(scaled_x, -dtype_max, dtype_max)
 
   return clipped_x.astype(q_dtype)
@@ -29,17 +30,19 @@ def quantize_dequantize(x, q_dtype, scale, compute_dtype):
 
 def compute_scale(amax, scale, fp8_max, margin=0):
   """Default function to convert amax to scaling factor."""
+  # This function copied from the TransformerEngine is used to compute its
+  # `scale`. However, our scale matches its `scale_inv` concept. So, we apply
+  # the reciprocal operation at the entry and exit of the function.
+  scale = 1.0 / scale
   exp = jnp.floor(jnp.log2(fp8_max / amax)) - margin
   sf = jnp.round(lax.pow(2., jnp.abs(exp)))
   sf = jnp.where(amax > 0.0, sf, scale)
   sf = jnp.where(lax.is_finite(amax), sf, scale)
   sf = jnp.where(exp < 0, 1.0 / sf, sf)
-  # The scaling factor we need equals to the notion of "scale_inv" in
-  # TransformerEngine. So, we convert the sf to its reciprocal.
   return 1.0 / sf
 
 def compute_scale_and_amax_history(x, q_dtype, scale, amax_history):
-  dtype_max = get_fp8_max(q_dtype)
+  dtype_max = get_fp8_max(q_dtype, jnp.float32)
 
   amax_update = jnp.max(jnp.abs(x)).astype(scale.dtype)
   new_amax_history = \
@@ -95,6 +98,13 @@ def fp8_dot(x, k, compute_dtype, x_scale, x_amax_history, k_scale,
   assert len(x.shape) == 2, f'x rank has to be 2, but got {len(x.shape)}'
   assert len(k.shape) == 2, f'k rank has to be 2, but got {len(k.shape)}'
 
+  assert (
+      x.dtype == compute_dtype
+  ), f'x dtype has to be {compute_dtype}, but got {x.dtype}'
+  assert (
+      k.dtype == compute_dtype
+  ), f'k dtype has to be {compute_dtype}, but got {k.dtype}'
+
   x_qdq = in_qdq(compute_dtype, x, x_scale, x_amax_history)
 
   k_qdq = in_qdq(compute_dtype, k, k_scale, k_amax_history)
@@ -113,7 +123,10 @@ def fp8_projection(x, w, use_bias, b, x_scale, x_amax_history, w_scale,
   assert len(b.shape) == 1, f'b rank has to be 1, but got {len(b.shape)}'
 
   batch_dims_rank = len(x.shape) - 1
-  dtype = x.dtype
+
+  # Get the compute dtype from the weight instead of x, thanks to the autocast.
+  dtype = w.dtype
+  x = jnp.asarray(x, dtype)
 
   batch_shape = x.shape[0:-1]
   n_dim = w.shape[-1]
@@ -144,7 +157,10 @@ def fp8_qkv_combined_projection(x, w, use_bias, b, x_scale, x_amax_history,
   assert len(w.shape) == 4, f'w rank has to be 4, but got {len(w.shape)}'
 
   batch_dims_rank = len(x.shape) - 1
-  dtype = x.dtype
+
+  # Get the compute dtype from the weight instead of x, thanks to the autocast.
+  dtype = w.dtype
+  x = jnp.asarray(x, dtype)
 
   batch_shape = x.shape[0:-1]
   knh_shape = [w.shape[0]] + list(w.shape[2:])
@@ -184,7 +200,10 @@ def fp8_qkv_projection(x, w, use_bias, b, x_scale, x_amax_history, w_scale,
   assert len(w.shape) == 3, f'w rank has to be 3, but got {len(w.shape)}'
 
   batch_dims_rank = len(x.shape) - 1
-  dtype = x.dtype
+
+  # Get the compute dtype from the weight instead of x, thanks to the autocast.
+  dtype = w.dtype
+  x = jnp.asarray(x, dtype)
 
   batch_shape = x.shape[0:-1]
   nh_shape = list(w.shape[1:])
@@ -219,7 +238,10 @@ def fp8_attention_output_projection(x, w, use_bias, b, x_scale, x_amax_history,
   assert len(b.shape) == 1, f'b rank has to be 1, but got {len(b.shape)}'
 
   batch_dims_rank = len(x.shape) - 2
-  dtype = x.dtype
+
+  # Get the compute dtype from the weight instead of x, thanks to the autocast.
+  dtype = w.dtype
+  x = jnp.asarray(x, dtype)
 
   batch_shape = x.shape[0:-2]
 

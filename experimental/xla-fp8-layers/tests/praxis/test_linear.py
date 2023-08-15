@@ -2,8 +2,8 @@ from functools import partial
 from absl.testing import absltest
 
 import numpy as np
+import os
 import re
-import tensorflow as tf
 
 from flax import traverse_util
 from fp8layers.praxis import Bias, Linear, FeedForward, MLPBlock
@@ -21,9 +21,12 @@ instantiate = base_layer.instantiate
 
 class LinearsTest(test_utils.TestCase):
   def setUp(self):
+    # The tests need to check the dtypes of the cublaslt custom calls, so we
+    # disable the triton gemms.
+    os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+
     super().setUp()
     np.random.seed(123456)
-    tf.random.set_seed(123)
 
   def testLinearFwd(self):
     di, do = 16, 32

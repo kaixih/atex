@@ -29,7 +29,7 @@ class Linear(base_layer.BaseLayer):
   """
   input_dims: int = 0
   output_dims: int = 0
-  amax_history_length: int = 16
+  amax_history_length: int = 1024
   weight_init: Optional[WeightInit] = None
 
   def setup(self) -> None:
@@ -50,7 +50,10 @@ class Linear(base_layer.BaseLayer):
         'dtype': jnp.float32,
         'mesh_shape': self.mesh_shape,
         'tensor_split_dims_mapping': None,
-        'collections': ['fp8_params'],
+        'collections': [
+            'fp8_params',
+            base_layer.WeightHParamsCollection.DISALLOW_BFLOAT16_CONVERSION,
+        ],
     }
     amax_history_args = {
         'shape': [self.amax_history_length],
@@ -58,7 +61,10 @@ class Linear(base_layer.BaseLayer):
         'dtype': jnp.float32,
         'mesh_shape': self.mesh_shape,
         'tensor_split_dims_mapping': None,
-        'collections': ['fp8_params'],
+        'collections': [
+            'fp8_params',
+            base_layer.WeightHParamsCollection.DISALLOW_BFLOAT16_CONVERSION,
+        ],
     }
     self.create_variable(
         'input_amax_history', WeightHParams(**amax_history_args))
